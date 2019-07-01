@@ -25,7 +25,7 @@ func Example() {
 		fmt.Printf("send %d and return %d", e.(int), r.(int))
 	})
 
-	w.OnError(func(e *Error) {
+	w.OnError(func(e Error) {
 		// set here what happens when a error is returned
 	})
 
@@ -39,7 +39,7 @@ func Example() {
 func TestRun(t *testing.T) {
 	entries := make(chan Entry)
 	responsesWithEntries := make(chan ResponseWithEntry)
-	chanErrors := make(chan error)
+	chanErrors := make(chan Error)
 	mu := sync.Mutex{}
 
 	table := map[int]int{
@@ -86,13 +86,8 @@ func TestRun(t *testing.T) {
 
 	go func() {
 		for e := range chanErrors {
-			we, ok := e.(*Error)
-			if !ok {
-				t.Errorf("run() e.(*Error) failed")
-				continue
-			}
 			mu.Lock()
-			if we.Entry() == 3 && we.Error() == "entry = 3" {
+			if e.Entry() == 3 && e.Error() == "entry = 3" {
 				errorOn3 = true
 			}
 			processedErrorCount++
@@ -169,7 +164,7 @@ func TestWorkStartEnd(t *testing.T) {
 		mu.Unlock()
 	})
 
-	w.OnError(func(e *Error) {
+	w.OnError(func(e Error) {
 		mu.Lock()
 		if e.Entry() == 3 && e.Error() == "entry = 3" {
 			errorOn3 = true

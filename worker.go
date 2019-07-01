@@ -27,8 +27,8 @@ func (e *Error) Entry() Entry {
 	return e.entry
 }
 
-func NewError(entry Entry, message string) *Error {
-	return &Error{entry, message}
+func NewError(entry Entry, message string) Error {
+	return Error{entry, message}
 }
 
 type Work struct {
@@ -37,7 +37,7 @@ type Work struct {
 	entries     chan Entry
 	responses   chan ResponseWithEntry
 	callback    func(Entry) (Response, error)
-	errors      chan error
+	errors      chan Error
 	done        chan bool
 }
 
@@ -72,11 +72,11 @@ func (w *Work) OnResponse(responseCallback func(Entry, Response)) *Work {
 	return w
 }
 
-func (w *Work) OnError(errorCallback func(err *Error)) *Work {
-	w.errors = make(chan error, w.buffer)
+func (w *Work) OnError(errorCallback func(err Error)) *Work {
+	w.errors = make(chan Error, w.buffer)
 	go func() {
 		for err := range w.errors {
-			errorCallback(err.(*Error))
+			errorCallback(err)
 		}
 		w.done <- true
 	}()
@@ -110,7 +110,7 @@ func (w *Work) Wait() *Work {
 	return w
 }
 
-func run(callback func(Entry) (Response, error), concurrency int, entries <-chan Entry, responses chan<- ResponseWithEntry, errors chan<- error) {
+func run(callback func(Entry) (Response, error), concurrency int, entries <-chan Entry, responses chan<- ResponseWithEntry, errors chan<- Error) {
 	var wg sync.WaitGroup
 	for work := 0; work < concurrency; work++ {
 		wg.Add(1)
