@@ -23,7 +23,7 @@ func Example() {
         fmt.Printf("send %d and return %d", e.(int), r.(int))
     })
 
-    w.OnError(func(e *Error) {
+    w.OnError(func(e Error) {
         // set here what happens when a error is returned
     })
 
