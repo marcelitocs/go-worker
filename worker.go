@@ -6,29 +6,16 @@ import (
 )
 
 type Entry interface{}
+type Result interface{}
 
-type Response interface{}
+type Response struct {
+	Result Result
+	Err    error
+}
 
 type ResponseWithEntry struct {
 	Entry    Entry
 	Response Response
-}
-
-type Error struct {
-	entry   Entry
-	message string
-}
-
-func (e *Error) Error() string {
-	return e.message
-}
-
-func (e *Error) Entry() Entry {
-	return e.entry
-}
-
-func NewError(entry Entry, message string) Error {
-	return Error{entry, message}
 }
 
 type Work struct {
@@ -36,8 +23,7 @@ type Work struct {
 	concurrency int
 	entries     chan Entry
 	responses   chan ResponseWithEntry
-	callback    func(Entry) (Response, error)
-	errors      chan Error
+	callback    func(Entry) (Result, error)
 	done        chan bool
 }
 
@@ -51,7 +37,7 @@ func NewWork(concurrency, buffer int) *Work {
 	return &w
 }
 
-func (w *Work) SetCallback(callback func(Entry) (Response, error)) *Work {
+func (w *Work) SetCallback(callback func(Entry) (Result, error)) *Work {
 	w.callback = callback
 	return w
 }
@@ -72,27 +58,13 @@ func (w *Work) OnResponse(responseCallback func(Entry, Response)) *Work {
 	return w
 }
 
-func (w *Work) OnError(errorCallback func(err Error)) *Work {
-	w.errors = make(chan Error, w.buffer)
-	go func() {
-		for err := range w.errors {
-			errorCallback(err)
-		}
-		w.done <- true
-	}()
-	return w
-}
-
 func (w *Work) Start() *Work {
 	if w.callback == nil {
 		panic(errors.New("callback not set"))
 	}
 	go func() {
-		run(w.callback, w.concurrency, w.entries, w.responses, w.errors)
+		run(w.callback, w.concurrency, w.entries, w.responses)
 		if w.responses == nil {
-			w.done <- true
-		}
-		if w.errors == nil {
 			w.done <- true
 		}
 	}()
@@ -106,26 +78,19 @@ func (w *Work) Stop() *Work {
 
 func (w *Work) Wait() *Work {
 	<-w.done
-	<-w.done
 	return w
 }
 
-func run(callback func(Entry) (Response, error), concurrency int, entries <-chan Entry, responses chan<- ResponseWithEntry, errors chan<- Error) {
+func run(callback func(Entry) (Result, error), concurrency int, entries <-chan Entry, responses chan<- ResponseWithEntry) {
 	var wg sync.WaitGroup
 	for work := 0; work < concurrency; work++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for entry := range entries {
-				response, err := callback(entry)
-				if err != nil {
-					if errors != nil {
-						errors <- NewError(entry, err.Error())
-					}
-					continue
-				}
+				result, err := callback(entry)
 				if responses != nil {
-					responses <- ResponseWithEntry{entry, response}
+					responses <- ResponseWithEntry{entry, Response{result, err}}
 				}
 			}
 		}()
@@ -133,8 +98,5 @@ func run(callback func(Entry) (Response, error), concurrency int, entries <-chan
 	wg.Wait()
 	if responses != nil {
 		close(responses)
-	}
-	if errors != nil {
-		close(errors)
 	}
 }

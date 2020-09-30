@@ -15,18 +15,18 @@ func Example() {
 		w.Stop()
 	}()
 
-	w.SetCallback(func(entry Entry) (Response, error) {
+	w.SetCallback(func(entry Entry) (Result, error) {
 		// set the workload here
 		// time.Sleep(time.Second)
 		return entry.(int) * 10, nil
 	})
 
 	w.OnResponse(func(e Entry, r Response) {
-		fmt.Printf("send %d and return %d", e.(int), r.(int))
-	})
-
-	w.OnError(func(e Error) {
-		// set here what happens when a error is returned
+		if r.Err != nil {
+			// set here what happens when a error is returned
+			return
+		}
+		fmt.Printf("send %d and return %d", e.(int), r.Result.(int))
 	})
 
 	// you must set a callback before call start
@@ -39,7 +39,6 @@ func Example() {
 func TestRun(t *testing.T) {
 	entries := make(chan Entry)
 	responsesWithEntries := make(chan ResponseWithEntry)
-	chanErrors := make(chan Error)
 	mu := sync.Mutex{}
 
 	table := map[int]int{
@@ -68,9 +67,16 @@ func TestRun(t *testing.T) {
 				t.Errorf("run() re.Entry.(int) failed")
 				continue
 			}
-			r, ok := re.Response.(int)
+			if re.Response.Err != nil {
+				if re.Entry == 3 && re.Response.Err.Error() == "entry = 3" {
+					errorOn3 = true
+				}
+				processedErrorCount++
+				continue
+			}
+			r, ok := re.Response.Result.(int)
 			if !ok {
-				t.Errorf("run() re.Response.(int) failed")
+				t.Errorf("run() re.Response.Result.(int) failed")
 				continue
 			}
 			if table[e] != r {
@@ -84,26 +90,13 @@ func TestRun(t *testing.T) {
 		done <- true
 	}()
 
-	go func() {
-		for e := range chanErrors {
-			mu.Lock()
-			if e.Entry() == 3 && e.Error() == "entry = 3" {
-				errorOn3 = true
-			}
-			processedErrorCount++
-			mu.Unlock()
-		}
-		done <- true
-	}()
-
-	run(func(entry Entry) (Response, error) {
+	run(func(entry Entry) (Result, error) {
 		if entry == 3 {
 			return nil, errors.New("entry = 3")
 		}
 		return entry.(int) * 10, nil
-	}, 2, entries, responsesWithEntries, chanErrors)
+	}, 2, entries, responsesWithEntries)
 
-	<-done
 	<-done
 
 	mu.Lock()
@@ -145,7 +138,7 @@ func TestWorkStartEnd(t *testing.T) {
 		w.Stop()
 	}()
 
-	w.SetCallback(func(entry Entry) (Response, error) {
+	w.SetCallback(func(entry Entry) (Result, error) {
 		if entry == 3 {
 			return nil, errors.New("entry = 3")
 		}
@@ -153,23 +146,23 @@ func TestWorkStartEnd(t *testing.T) {
 	})
 
 	w.OnResponse(func(e Entry, r Response) {
-		if e == 3 {
-			t.Errorf("return entry 3 as response")
+		if r.Err != nil {
+			mu.Lock()
+			if e == 3 && r.Err.Error() == "entry = 3" {
+				errorOn3 = true
+			}
+			processedErrorCount++
+			mu.Unlock()
+			return
 		}
-		if table[e.(int)] != r {
+		if e == 3 {
+			t.Errorf("return entry 3 without error")
+		}
+		if table[e.(int)] != r.Result {
 			t.Errorf("return %v as response, wants %v", r, table[e.(int)])
 		}
 		mu.Lock()
 		processedCount++
-		mu.Unlock()
-	})
-
-	w.OnError(func(e Error) {
-		mu.Lock()
-		if e.Entry() == 3 && e.Error() == "entry = 3" {
-			errorOn3 = true
-		}
-		processedErrorCount++
 		mu.Unlock()
 	})
 
@@ -208,9 +201,9 @@ func BenchmarkRun(b *testing.B) {
 			}
 		}()
 
-		run(func(entry Entry) (Response, error) {
+		run(func(entry Entry) (Result, error) {
 			return nil, nil
-		}, 1, entries, responses, nil)
+		}, 1, entries, responses)
 	}
 }
 
@@ -226,7 +219,7 @@ func BenchmarkWorkStartEnd(b *testing.B) {
 
 		})
 
-		w.SetCallback(func(entry Entry) (response Response, err error) {
+		w.SetCallback(func(entry Entry) (result Result, err error) {
 			return nil, nil
 		})
 
@@ -241,7 +234,7 @@ func BenchmarkProcessing(b *testing.B) {
 
 	})
 
-	w.SetCallback(func(entry Entry) (response Response, err error) {
+	w.SetCallback(func(entry Entry) (result Result, err error) {
 		return nil, nil
 	})
 
@@ -258,7 +251,7 @@ func BenchmarkProcessing(b *testing.B) {
 func BenchmarkProcessingWithoutResponse(b *testing.B) {
 	w := NewWork(1, 0)
 
-	w.SetCallback(func(entry Entry) (response Response, err error) {
+	w.SetCallback(func(entry Entry) (result Result, err error) {
 		return nil, nil
 	})
 
